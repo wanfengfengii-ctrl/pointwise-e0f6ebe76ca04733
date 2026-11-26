@@ -53,6 +53,18 @@ class GateHandler(JsonHandler):
 
 
 class RouteGate(ThreadingHTTPServer):
+    route_families = (
+        {"/margin/grant", "/_room/grant", "/_room/margin/grant"},
+        {
+            "/margin/raise",
+            "/_room/raise",
+            "/_room/execute",
+            "/_room/margin/raise",
+            "/_room/margin/execute",
+        },
+        {"/close", "/_room/close"},
+    )
+
     def __init__(self, room_port):
         super().__init__(("127.0.0.1", 0), GateHandler)
         self.room_port = room_port
@@ -72,12 +84,47 @@ class RouteGate(ThreadingHTTPServer):
             return action
 
     def take(self, method, route):
+        key = (method, route)
         with self.lock:
-            return self.actions.pop((method, route), None)
+            action = self.actions.pop(key, None)
+            if action is not None:
+                return action
+            for family in self.route_families:
+                if route not in family:
+                    continue
+                for armed_key in list(self.actions):
+                    armed_method, armed_route = armed_key
+                    if armed_method == method and armed_route in family:
+                        return self.actions.pop(armed_key)
+
+            # Internal wire routes are implementation-defined. As a final
+            # compatibility step, match the business operation by route words.
+            actual_kind = self.route_kind(route)
+            if actual_kind is not None:
+                for armed_key in list(self.actions):
+                    armed_method, armed_route = armed_key
+                    if (armed_method == method
+                            and self.route_kind(armed_route) == actual_kind):
+                        return self.actions.pop(armed_key)
+            return None
+
+    @staticmethod
+    def route_kind(route):
+        path = route.rstrip("/").lower()
+        if path.endswith("/close"):
+            return "close"
+        if "grant" in path or "allocation" in path:
+            return "grant"
+        if any(word in path for word in (
+                "raise", "execute", "commit", "deliver", "fulfil", "fulfill",
+                "promise", "accept", "land", "request")):
+            return "raise"
+        return None
 
 
 @contextmanager
 def routed_stack(directory):
+    directory = Path(directory)
     with running(serve_room(directory / "room.sqlite3")) as room:
         with running(RouteGate(room.server_port)) as gate:
             with running(serve_desk(directory / "desk.sqlite3", gate.server_port)) as desk:

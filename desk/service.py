@@ -1,22 +1,14 @@
 import argparse
 from http.server import ThreadingHTTPServer
 
+from desk.closing import close_with_desk_status
 from desk.dispatch import submit_adjustment
+from desk.margin import note_opened_hall, submit_grant, submit_raise
 from desk.preview import preview_adjustment
-from desk.requests import has_pending_requests, list_terminal_requests
 from desk.requests_query import query_request
 from desk.room_link import RoomClient
 from desk.store import DeskDatabase
 from http_json import ApiError, JsonHandler, identifier
-
-
-def close_with_desk_status(database, room, hall):
-    # Keep new desk admissions out until the room has decided whether to close.
-    with database.write_transaction() as connection:
-        if has_pending_requests(connection, hall):
-            raise ApiError("pending_requests", 409)
-        terminal = list_terminal_requests(connection, hall)
-        return room.call("POST", "/_room/close", {"hall": hall, "terminal": terminal})
 
 
 class DeskHandler(JsonHandler):
@@ -45,9 +37,19 @@ class DeskHandler(JsonHandler):
             return preview_adjustment(room, body)
         if route == "/submit":
             return submit_adjustment(database, room, body)
+        if route == "/margin/grant":
+            return submit_grant(database, room, body)
+        if route == "/margin/raise":
+            return submit_raise(database, room, body)
         if route == "/close":
             return close_with_desk_status(database, room, identifier(body.get("hall")))
-        if route in {"/open", "/sample", "/listen", "/manual"}:
+        if route == "/open":
+            result = room.call("POST", "/open", body)
+            hall = identifier(body.get("hall"))
+            with database.write_transaction() as connection:
+                note_opened_hall(connection, hall, isinstance(body.get("margin"), dict))
+            return result
+        if route in {"/sample", "/listen", "/manual", "/margin/local"}:
             return room.call("POST", route, body)
         raise ApiError("unknown_route", 404)
 

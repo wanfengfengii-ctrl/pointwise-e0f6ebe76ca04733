@@ -19,6 +19,8 @@ class RoomDatabase:
                     closed INTEGER NOT NULL DEFAULT 0 CHECK (closed IN (0, 1))
                 )
             ''')
+            from room.margin import initialize_margin_tables
+            initialize_margin_tables(connection)
             initialize_channels(connection)
             initialize_levels(connection)
             initialize_samples(connection)

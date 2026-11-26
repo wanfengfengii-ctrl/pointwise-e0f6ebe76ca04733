@@ -1,4 +1,5 @@
 from sqlite_store import transaction
+from desk.margin import initialize_desk_margin_tables
 
 
 class DeskDatabase:
@@ -16,6 +17,7 @@ class DeskDatabase:
                     PRIMARY KEY (hall, request_id)
                 )
             ''')
+            initialize_desk_margin_tables(connection)
 
     def read_snapshot(self):
         return transaction(self.path, write=False)

@@ -7,6 +7,12 @@ from room.execute import execute_adjustment
 from room.history import find_remote_result
 from room.levels import read_levels
 from room.manual import apply_manual
+from room.margin import (
+    execute_margin_raise,
+    get_margin_config,
+    grant_margin,
+    apply_margin_local,
+)
 from session.closing import close_session
 from session.opening import open_session
 from session.store import RoomDatabase, get_session
@@ -30,7 +36,15 @@ class RoomHandler(JsonHandler):
             hall, = self.query("hall")
             with database.read_snapshot() as connection:
                 session = get_session(connection, hall)
-                return {**session, "levels": read_levels(connection, hall)}
+                margin = get_margin_config(connection, hall)
+                snapshot = {**session, "levels": read_levels(connection, hall)}
+                if margin is not None:
+                    snapshot["margin"] = {
+                        "limit": margin["limit"],
+                        "local_channel": margin["local_channel"],
+                        "remote_channel": margin["remote_channel"],
+                    }
+                return snapshot
         if self.route == "/_room/receipt":
             hall, request_id = self.query("hall", "request_id")
             with database.read_snapshot() as connection:
@@ -55,6 +69,12 @@ class RoomHandler(JsonHandler):
             return listen(database, hall, body.get("samples"))
         if route == "/manual":
             return apply_manual(database, hall, body)
+        if route == "/margin/local":
+            return apply_margin_local(database, hall, body)
+        if route in {"/margin/grant", "/_room/margin/grant"}:
+            return grant_margin(database, hall, body)
+        if route in {"/margin/raise", "/_room/margin/raise", "/_room/margin/execute"}:
+            return execute_margin_raise(database, hall, body)
         if route == "/_room/execute":
             return execute_adjustment(database, hall, body)
         if route == "/_room/close":
